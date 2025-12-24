@@ -22,31 +22,39 @@ impl PriceGenerator {
     pub fn next_price(&mut self) -> (f64, f64) {
         let mut rng = rand::thread_rng();
 
-        // Random walk component
-        let random_change = rng.gen_range(-1.0..1.0) * self.volatility;
+        // Random walk component - increased influence for more variation
+        let random_change = rng.gen_range(-1.0..1.0) * self.volatility * 1.5;
 
-        // Mean reversion component (pulls price back toward base)
-        let mean_reversion = (self.base_price - self.current_price) * self.mean_reversion_speed;
-
-        // Occasional larger moves (simulating news events)
-        let news_event = if rng.gen_ratio(1, 100) {
-            rng.gen_range(-0.05..0.05) // 5% move
+        // Mean reversion component - very gentle to allow trends
+        let deviation_pct = (self.current_price - self.base_price) / self.base_price;
+        // Only apply mean reversion when price deviates more than 10%
+        let mean_reversion = if deviation_pct.abs() > 0.1 {
+            -deviation_pct * self.mean_reversion_speed * 0.5
         } else {
             0.0
         };
 
-        // Calculate percentage change
-        let total_change = random_change + mean_reversion + news_event;
+        // More frequent but varied news events for interesting movements
+        let news_event = if rng.gen_ratio(1, 50) {
+            rng.gen_range(-0.03..0.03) // 3% move on "news"
+        } else if rng.gen_ratio(1, 10) {
+            rng.gen_range(-0.01..0.01) // 1% micro-movements
+        } else {
+            0.0
+        };
+
+        // Calculate percentage change with wider bounds
+        let total_change = (random_change + mean_reversion + news_event).clamp(-0.08, 0.08);
         self.current_price *= 1.0 + total_change;
 
-        // Ensure price stays positive
-        if self.current_price < 0.01 {
-            self.current_price = 0.01;
-        }
+        // Wider price bounds for more realistic market behavior (70% to 140% of base)
+        let min_price = self.base_price * 0.7;
+        let max_price = self.base_price * 1.4;
+        self.current_price = self.current_price.clamp(min_price, max_price);
 
-        // Generate volume (higher volume on larger price moves)
-        let base_volume = rng.gen_range(100_000.0..1_000_000.0);
-        let volume_multiplier = 1.0 + total_change.abs() * 10.0;
+        // Generate volume with more variation
+        let base_volume = rng.gen_range(50_000.0..2_000_000.0);
+        let volume_multiplier = 1.0 + total_change.abs() * 8.0;
         let volume = base_volume * volume_multiplier;
 
         (self.current_price, volume)
@@ -79,12 +87,13 @@ mod tests {
     }
 
     #[test]
-    fn test_price_stays_positive() {
-        let mut generator = PriceGenerator::new(0.1, 0.5);
+    fn test_price_stays_in_bounds() {
+        let mut generator = PriceGenerator::new(100.0, 0.02);
 
         for _ in 0..1000 {
             let (price, _) = generator.next_price();
-            assert!(price >= 0.01);
+            // Price should stay between 70% and 140% of base (100.0)
+            assert!(price >= 70.0 && price <= 140.0);
         }
     }
 }
